@@ -1,7 +1,8 @@
 // ==UserScript==
 // @name         RDN WME Open Other Maps
 // @namespace    https://github.com/rdnnk/oom_rdn
-// @version      2026.06.10.09
+// @author       rdnnk
+// @version      2026.10.20.01
 // @description  Quick links to open external maps at the current WME location. Migrated to the WME SDK (no WazeWrap / OpenLayers).
 // @match        https://www.waze.com/editor*
 // @match        https://www.waze.com/*/editor*
