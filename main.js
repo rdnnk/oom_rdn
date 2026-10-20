@@ -1,5 +1,6 @@
 // ==UserScript==
 // @name         RDN WME Open Other Maps
+// @namespace    https://github.com/rdnnk/oom_rdn
 // @version      2026.06.10.09
 // @description  Quick links to open external maps at the current WME location. Migrated to the WME SDK (no WazeWrap / OpenLayers).
 // @match        https://www.waze.com/editor*
@@ -23,6 +24,8 @@
 // @resource     Here      https://www.google.com/s2/favicons?domain=here.com&sz=64
 // @resource     Roadworks https://www.google.com/s2/favicons?domain=roadworks.org&sz=64
 // @resource     Melvin    https://www.google.com/s2/favicons?domain=waze.cc&sz=64
+// @updateURL    https://raw.githubusercontent.com/rdnnk/oom_rdn/main/main.js
+// @downloadURL  https://raw.githubusercontent.com/rdnnk/oom_rdn/main/main.js
 // @noframes
 // ==/UserScript==
 
