@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         RDN WME Open Other Maps
-// @version      2026.06.10.08
+// @version      2026.06.10.09
 // @description  Quick links to open external maps at the current WME location. Migrated to the WME SDK (no WazeWrap / OpenLayers).
 // @match        https://www.waze.com/editor*
 // @match        https://www.waze.com/*/editor*
 // @match        https://beta.waze.com/*editor*
-// @match        *://www.google.com/maps/*
+// @match        *://www.google.com/maps*
+// @match        https://www.waze.com/partnerhub/*
 // @match        https://ipi.eprostor.gov.si/jv*
 // @exclude      https://www.waze.com/user/editor*
 // @require      https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js
@@ -65,40 +66,139 @@
   }
 
   // ----------------------------------------------------------------------------
-  // Reverse direction: a button on Google Maps that opens WME at this location.
-  // Runs on google.com/maps where the WME SDK is unavailable, so it stays DOM/URL only.
+  // Reverse direction: an "open in WME" button on other map sites (Google Maps
+  // and the Waze Partner Hub map tool). These pages do not have the WME SDK, so
+  // we work out the location from the page's URL and build an editor link.
   // ----------------------------------------------------------------------------
-  function GMToWaze() {
-    const parts = location.href.split('@').pop().split(',');
-    const lat = parts[0];
-    const lon = parts[1];
-    let zoom = parseInt(parts[2], 10);
-    if (Number.isNaN(zoom) || zoom > 21) zoom = 17;
-    // WME editor URL still uses the legacy 0-10 zoom scale for ?zoom=
-    const wmeZoom = Math.max(0, Math.min(10, zoom - 12));
-    return `https://www.waze.com/en-US/editor/?lon=${lon}&lat=${lat}&zoom=${wmeZoom}`;
+
+  // Waze environment the editor link should open in:
+  //   'row' = Rest of World (includes Slovenia), 'usa' = United States, 'il' = Israel.
+  const EDITOR_ENV = 'row';
+
+  // The editor's zoomLevel uses the same scale as web maps (~12 = region,
+  // ~17 = street level, up to 22). We pass the web zoom straight through and
+  // clamp it to the range the editor accepts.
+  function editorZoom(webZoom) {
+    let zoom = parseInt(webZoom, 10);
+    if (Number.isNaN(zoom)) zoom = 17;
+    return Math.max(12, Math.min(22, zoom));
   }
 
-  function initGoogleMaps() {
-    if (document.getElementById('OOMWazeButtonDiv')) return;
+  // Builds a WME editor link, e.g.
+  //   https://www.waze.com/en-US/editor?env=row&lat=46.06201&lon=14.52172&zoomLevel=17
+  function editorUrl(lat, lon, webZoom) {
+    return 'https://www.waze.com/en-US/editor?env=' + EDITOR_ENV +
+      `&lat=${lat}&lon=${lon}&zoomLevel=${editorZoom(webZoom)}`;
+  }
+
+  // Google Maps keeps the view in the URL as ".../@<lat>,<lon>,<zoom>z".
+  function googleMapsToWaze() {
+    const afterAt = location.href.split('@').pop();
+    const parts = afterAt.split(',');
+    const lat = parts[0];
+    const lon = parts[1];
+    const zoom = parts[2];
+    return editorUrl(lat, lon, zoom);
+  }
+
+  // Partner Hub map tool. The forward link we generate uses ?lat=&lon=, so we
+  // look for those (and a few common alternatives) in the URL query and hash.
+  // Returns a WME link, or null if no coordinates could be found in the URL.
+  function partnerHubToWaze() {
+    function paramsFrom(str) {
+      return new URLSearchParams(str.replace(/^[?#]/, ''));
+    }
+    const query = paramsFrom(location.search);
+    const hash = paramsFrom(location.hash);
+
+    function pick(names) {
+      for (let i = 0; i < names.length; i++) {
+        const value = query.get(names[i]) || hash.get(names[i]);
+        if (value) {
+          return value;
+        }
+      }
+      return null;
+    }
+
+    const lat = pick(['lat', 'latitude']);
+    const lon = pick(['lon', 'lng', 'longitude']);
+    const zoom = pick(['zoomLevel', 'zoom', 'z']);
+    if (!lat || !lon) {
+      return null;
+    }
+    return editorUrl(lat, lon, zoom);
+  }
+
+  // Injects a small fixed "WME" button. computeUrl() returns the editor link to
+  // open, or null if the current location could not be read from the page.
+  // rightPx sets the distance from the right edge of the window (default 30).
+  // missingMessage is shown if the location can't be read (default is generic).
+  function addWmeOpenButton(computeUrl, rightPx, missingMessage) {
+    if (document.getElementById('OOMWazeButtonDiv')) {
+      return;
+    }
+    const right = (typeof rightPx === 'number') ? rightPx : 30;
+    const noLocationMessage = missingMessage ||
+      'Open Other Maps: could not read the current location from this page.';
     const el = document.createElement('div');
     el.id = 'OOMWazeButtonDiv';
     el.title = 'Open in WME (Ctrl+C copies the WME link)';
     el.textContent = 'WME';
     el.style.cssText =
-      'position:fixed;right:30px;top:75px;z-index:9999;width:40px;height:30px;' +
+      `position:fixed;right:${right}px;top:75px;z-index:9999;width:40px;height:30px;` +
       'background:#33ccff;color:#fff;font:bold 13px Arial,sans-serif;border-radius:4px;' +
       'display:flex;align-items:center;justify-content:center;cursor:pointer;' +
       'box-shadow:0 1px 4px rgba(0,0,0,0.4);';
-    (document.getElementById('content-container') || document.body).appendChild(el);
+    document.body.appendChild(el);
 
-    const copyHotkey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.which === 67) copyToClipboard(GMToWaze());
-    };
+    function openInWme() {
+      const url = computeUrl();
+      if (url) {
+        window.open(url);
+      } else {
+        alert(noLocationMessage);
+      }
+    }
 
-    el.addEventListener('click', () => window.open(GMToWaze()));
+    function copyHotkey(e) {
+      if ((e.metaKey || e.ctrlKey) && e.which === 67) {
+        const url = computeUrl();
+        if (url) {
+          copyToClipboard(url);
+        }
+      }
+    }
+
+    el.addEventListener('click', openInWme);
     el.addEventListener('mouseenter', () => document.addEventListener('keydown', copyHotkey));
     el.addEventListener('mouseleave', () => document.removeEventListener('keydown', copyHotkey));
+  }
+
+  // Google Maps and the Partner Hub are single-page apps: they re-render and
+  // navigate without a full page reload, which can remove our button from the
+  // page. So we add it now and then re-add it whenever it goes missing - the
+  // same approach as the WME bottom-bar watcher further down.
+  function watchWmeButton(computeUrl, rightPx, missingMessage) {
+    addWmeOpenButton(computeUrl, rightPx, missingMessage);
+    setInterval(() => {
+      const el = document.getElementById('OOMWazeButtonDiv');
+      if (!el || !el.isConnected) {
+        addWmeOpenButton(computeUrl, rightPx, missingMessage);
+      }
+    }, 1500);
+  }
+
+  function initGoogleMaps() {
+    watchWmeButton(googleMapsToWaze);
+  }
+
+  function initPartnerHub() {
+    const message =
+      'Open Other Maps: the Partner Hub has not set a location yet.\n\n' +
+      'Click anywhere on the map first so the coordinates appear in the address bar, ' +
+      'then press the WME button again.';
+    watchWmeButton(partnerHubToWaze, 60, message); // sits further from the right edge than the default
   }
 
   // ----------------------------------------------------------------------------
@@ -172,8 +272,9 @@
     return 14;
   }
 
-  // Each entry: key, label, short (badge text), color, and a url(center, zoom, lang)
-  // builder. center = { lon, lat } (WGS84). zoom = clamped WME zoom level.
+  // Each entry: key, label, short (badge text), color, active (whether the map
+  // is enabled by default), and a url(center, zoom, lang) builder.
+  // center = { lon, lat } (WGS84). zoom = clamped WME zoom level.
   const MAPS = [
     { key: 'GMaps',     label: 'Google Maps',     short: 'G',   color: '#1a73e8', active: true,
       url: (c, z, lang) => {
@@ -696,6 +797,10 @@
   }
   if (location.hostname.endsWith('google.com') && location.pathname.includes('/maps')) {
     initGoogleMaps();
+    return;
+  }
+  if (location.hostname === 'www.waze.com' && location.pathname.startsWith('/partnerhub')) {
+    initPartnerHub();
     return;
   }
 
